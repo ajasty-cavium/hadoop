@@ -38,7 +38,7 @@
 #include "bulk_crc32.h"
 #include "gcc_optimizations.h"
 
-#if (!defined(__FreeBSD__) && !defined(WINDOWS))
+#if (!defined(__FreeBSD__) && !defined(WINDOWS)) && !defined(__aarch64__)
 #define USE_PIPELINED
 #endif
 
@@ -654,7 +654,39 @@ static void pipelined_crc32c(uint32_t *crc1, uint32_t *crc2, uint32_t *crc3, con
 
 # endif // 64-bit vs 32-bit
 
-#else // end x86 architecture
+//#else // end x86 architecture
+#elif defined(__aarch64__)
+
+#define CRC32X(crc,v) asm("crc32cx %w[c], %w[c], %x[v]" : [c]"+r"(crc) : [v]"r"(value))
+#define CRC32B(crc,v) asm("crc32cb %w[c], %w[c], %w[v]" : [c]"+r"(crc) : [v]"r"(value))
+
+static uint32_t crc32c_hardware(uint32_t crc, const uint8_t *pbuf, size_t length)
+{
+    int len = length;
+    uint64_t x1;
+
+    if(len > 128)__builtin_prefetch(pbuf + 128);
+    asm(".cpu generic+crc");
+    while ((((int)pbuf) & 0xf) && len) {
+	CRC32B(crc, *pbuf++);
+	len--;
+    }
+
+    while(len >= 8) {
+	if (!(((int)pbuf) & 0x3f)) __builtin_prefetch(pbuf + 256);
+	x1 = *((uint64_t*)pbuf);
+	CRC32X(crc, x1);
+	pbuf += 8;
+	len -= 8;
+    }
+
+    while (len--) {
+	CRC32B(crc, *(pbuf++));
+    }
+    return crc;
+}
+
+#else
 
 static uint32_t crc32c_hardware(uint32_t crc, const uint8_t* data, size_t length) {
   // never called!
